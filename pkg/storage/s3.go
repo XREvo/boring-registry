@@ -369,6 +369,18 @@ func (s *S3Storage) MirroredSha256Sum(ctx context.Context, provider *core.Provid
 	return core.NewSha256Sums(provider.ShasumFileName(), bytes.NewReader(shaSumBytes))
 }
 
+func (s *S3Storage) GetMirroredSha256SumsFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	prefix := providerStoragePrefix(s.bucketPrefix, mirrorProviderType, provider.Hostname, provider.Namespace, provider.Name)
+	key := filepath.Join(prefix, provider.ShasumFileName())
+	return s.download(ctx, key)
+}
+
+func (s *S3Storage) GetMirroredSha256SumsSignatureFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	prefix := providerStoragePrefix(s.bucketPrefix, mirrorProviderType, provider.Hostname, provider.Namespace, provider.Name)
+	key := filepath.Join(prefix, provider.ShasumSignatureFileName())
+	return s.download(ctx, key)
+}
+
 func (s *S3Storage) UploadMirroredFile(ctx context.Context, provider *core.Provider, fileName string, reader io.Reader) error {
 	prefix := providerStoragePrefix(s.bucketPrefix, mirrorProviderType, provider.Hostname, provider.Namespace, provider.Name)
 	key := filepath.Join(prefix, fileName)

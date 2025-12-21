@@ -14,6 +14,8 @@ type upstreamProvider interface {
 	listProviderVersions(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error)
 	getProvider(ctx context.Context, provider *core.Provider) (*core.Provider, error)
 	shaSums(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error)
+	getSha256SumsFile(ctx context.Context, provider *core.Provider) ([]byte, error)
+	getSha256SumsSignatureFile(ctx context.Context, provider *core.Provider) ([]byte, error)
 }
 
 type upstreamProviderRegistry struct {
@@ -96,6 +98,38 @@ func (u *upstreamProviderRegistry) shaSums(ctx context.Context, provider *core.P
 		return nil, fmt.Errorf("failed to parse SHA256SUM: %w", err)
 	}
 	return sha256Sums, nil
+}
+
+func (u *upstreamProviderRegistry) getSha256SumsFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.SHASumsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := u.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	return decodeUpstreamRawFileResponse(resp)
+}
+
+func (u *upstreamProviderRegistry) getSha256SumsSignatureFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.SHASumsSignatureURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := u.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	return decodeUpstreamRawFileResponse(resp)
 }
 
 func newUpstreamProviderRegistry(remoteServiceDiscovery discovery.ServiceDiscoveryResolver) *upstreamProviderRegistry {

@@ -50,6 +50,18 @@ func buildShaSumsKey(provider *core.Provider) string {
 		provider.Hostname, provider.Namespace, provider.Name, provider.Version)
 }
 
+// Builds a cache key for SHA256SUMS file content
+func buildSha256SumsFileKey(provider *core.Provider) string {
+	return fmt.Sprintf("shasums-file:%s/%s/%s/%s",
+		provider.Hostname, provider.Namespace, provider.Name, provider.Version)
+}
+
+// Builds a cache key for SHA256SUMS.sig file content
+func buildSha256SumsSignatureFileKey(provider *core.Provider) string {
+	return fmt.Sprintf("shasums-sig-file:%s/%s/%s/%s",
+		provider.Hostname, provider.Namespace, provider.Name, provider.Version)
+}
+
 // Estimates the size in bytes of an object via JSON marshaling (usefull for cache Weigther func)
 func estimateSize(data interface{}) int {
 	bytes, err := json.Marshal(data)
@@ -141,6 +153,62 @@ func (c *cachedUpstreamProvider) shaSums(ctx context.Context, provider *core.Pro
 	c.cache.Set(key, entry)
 
 	return sums, nil
+}
+
+// Implements upstreamProvider's getSha256SumsFile method, with caching
+func (c *cachedUpstreamProvider) getSha256SumsFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	key := buildSha256SumsFileKey(provider)
+
+	// Try to get from cache
+	if entry, ok := c.cache.GetIfPresent(key); ok {
+		if fileContent, ok := entry.data.([]byte); ok {
+			return fileContent, nil
+		}
+	}
+
+	// Cache miss - call upstream
+	fileContent, err := c.upstream.getSha256SumsFile(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache
+	entry := &cacheEntry{
+		data:      fileContent,
+		timestamp: time.Now(),
+		sizeBytes: len(fileContent),
+	}
+	c.cache.Set(key, entry)
+
+	return fileContent, nil
+}
+
+// Implements upstreamProvider's getSha256SumsSignatureFile method, with caching
+func (c *cachedUpstreamProvider) getSha256SumsSignatureFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	key := buildSha256SumsSignatureFileKey(provider)
+
+	// Try to get from cache
+	if entry, ok := c.cache.GetIfPresent(key); ok {
+		if fileContent, ok := entry.data.([]byte); ok {
+			return fileContent, nil
+		}
+	}
+
+	// Cache miss - call upstream
+	fileContent, err := c.upstream.getSha256SumsSignatureFile(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache
+	entry := &cacheEntry{
+		data:      fileContent,
+		timestamp: time.Now(),
+		sizeBytes: len(fileContent),
+	}
+	c.cache.Set(key, entry)
+
+	return fileContent, nil
 }
 
 // Creates a new upstream provider wrapper with caching

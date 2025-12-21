@@ -14,9 +14,11 @@ import (
 )
 
 type mockedUpstreamProvider struct {
-	customListProviderVersions func(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error)
-	customGetProvider          func(ctx context.Context, provider *core.Provider) (*core.Provider, error)
-	customShaSums              func(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error)
+	customListProviderVersions       func(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error)
+	customGetProvider                func(ctx context.Context, provider *core.Provider) (*core.Provider, error)
+	customShaSums                    func(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error)
+	customGetSha256SumsFile          func(ctx context.Context, provider *core.Provider) ([]byte, error)
+	customGetSha256SumsSignatureFile func(ctx context.Context, provider *core.Provider) ([]byte, error)
 }
 
 func (m *mockedUpstreamProvider) listProviderVersions(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error) {
@@ -31,13 +33,29 @@ func (m *mockedUpstreamProvider) shaSums(ctx context.Context, provider *core.Pro
 	return m.customShaSums(ctx, provider)
 }
 
+func (m *mockedUpstreamProvider) getSha256SumsFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	if m.customGetSha256SumsFile != nil {
+		return m.customGetSha256SumsFile(ctx, provider)
+	}
+	return nil, nil
+}
+
+func (m *mockedUpstreamProvider) getSha256SumsSignatureFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	if m.customGetSha256SumsSignatureFile != nil {
+		return m.customGetSha256SumsSignatureFile(ctx, provider)
+	}
+	return nil, nil
+}
+
 type mockedStorage struct {
-	listMirrorProviders       func(ctx context.Context, provider *core.Provider) ([]*core.Provider, error)
-	getMirroredProvider       func(ctx context.Context, provider *core.Provider) (*core.Provider, error)
-	mirroredSha256Sum         func(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error)
-	uploadMirroredFile        func(ctx context.Context, provider *core.Provider, filename string, reader io.Reader) error
-	mirroredSigningKeys       func(ctx context.Context, hostname, namespace string) (*core.SigningKeys, error)
-	uploadMirroredSigningKeys func(ctx context.Context, hostname, namespace string, signingKeys *core.SigningKeys) error
+	listMirrorProviders            func(ctx context.Context, provider *core.Provider) ([]*core.Provider, error)
+	getMirroredProvider            func(ctx context.Context, provider *core.Provider) (*core.Provider, error)
+	mirroredSha256Sum              func(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error)
+	uploadMirroredFile             func(ctx context.Context, provider *core.Provider, filename string, reader io.Reader) error
+	mirroredSigningKeys            func(ctx context.Context, hostname, namespace string) (*core.SigningKeys, error)
+	uploadMirroredSigningKeys      func(ctx context.Context, hostname, namespace string, signingKeys *core.SigningKeys) error
+	getMirroredSha256SumsFile      func(ctx context.Context, provider *core.Provider) ([]byte, error)
+	getMirroredSha256SumsSignature func(ctx context.Context, provider *core.Provider) ([]byte, error)
 }
 
 func (m *mockedStorage) ListMirroredProviders(ctx context.Context, provider *core.Provider) ([]*core.Provider, error) {
@@ -62,6 +80,20 @@ func (m *mockedStorage) UploadMirroredSigningKeys(ctx context.Context, hostname,
 
 func (m *mockedStorage) MirroredSha256Sum(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error) {
 	return m.mirroredSha256Sum(ctx, provider)
+}
+
+func (m *mockedStorage) GetMirroredSha256SumsFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	if m.getMirroredSha256SumsFile != nil {
+		return m.getMirroredSha256SumsFile(ctx, provider)
+	}
+	return nil, nil
+}
+
+func (m *mockedStorage) GetMirroredSha256SumsSignatureFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	if m.getMirroredSha256SumsSignature != nil {
+		return m.getMirroredSha256SumsSignature(ctx, provider)
+	}
+	return nil, nil
 }
 
 func Test_pullThroughMirror_ListProviderVersions(t *testing.T) {

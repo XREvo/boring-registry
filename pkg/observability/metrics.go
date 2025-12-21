@@ -28,9 +28,11 @@ type ServerMetrics struct {
 	Http     *HttpMetrics
 }
 type MirrorMetrics struct {
-	ListProviderVersions     *prometheus.CounterVec
-	ListProviderInstallation *prometheus.CounterVec
-	RetrieveProviderArchive  *prometheus.CounterVec
+	ListProviderVersions        *prometheus.CounterVec
+	ListProviderInstallation    *prometheus.CounterVec
+	RetrieveProviderArchive     *prometheus.CounterVec
+	RetrieveSha256Sums          *prometheus.CounterVec
+	RetrieveSha256SumsSignature *prometheus.CounterVec
 }
 type ModuleMetrics struct {
 	ListVersions *prometheus.CounterVec
@@ -94,6 +96,24 @@ func NewMetrics(buckets []float64) *ServerMetrics {
 					Help:      "The total number of provider retreive requests by mirror",
 				},
 				[]string{HostnameLabel, NamespaceLabel, NameLabel, VersionLabel, OsLabel, ArchLabel},
+			),
+			RetrieveSha256Sums: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Namespace: boringNamespace,
+					Subsystem: mirrorsSubsystem,
+					Name:      "retrieve_sha256sums_total",
+					Help:      "The total number of SHA256SUMS file requests by mirror",
+				},
+				[]string{HostnameLabel, NamespaceLabel, NameLabel, VersionLabel},
+			),
+			RetrieveSha256SumsSignature: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Namespace: boringNamespace,
+					Subsystem: mirrorsSubsystem,
+					Name:      "retrieve_sha256sums_signature_total",
+					Help:      "The total number of SHA256SUMS.sig file requests by mirror",
+				},
+				[]string{HostnameLabel, NamespaceLabel, NameLabel, VersionLabel},
 			),
 		},
 		Provider: &ProviderMetrics{

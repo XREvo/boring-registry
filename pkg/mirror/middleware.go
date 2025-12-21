@@ -92,6 +92,52 @@ func (mw loggingMiddleware) RetrieveProviderArchive(ctx context.Context, provide
 	return mw.next.RetrieveProviderArchive(ctx, provider)
 }
 
+func (mw loggingMiddleware) RetrieveSha256Sums(ctx context.Context, provider *core.Provider) (response *retrieveSha256SumsResponse, err error) {
+	defer func(begin time.Time) {
+		logger := slog.Default().With(
+			slog.String("op", "RetrieveSha256Sums"),
+			slog.Group("provider",
+				slog.String("hostname", provider.Hostname),
+				slog.String("namespace", provider.Namespace),
+				slog.String("name", provider.Name),
+				slog.String("version", provider.Version),
+			),
+		)
+
+		if err != nil {
+			logger.Error("failed to retrieve SHA256SUMS", slog.String("err", err.Error()))
+			return
+		}
+
+		logger.Info("retrieve SHA256SUMS", slog.String("took", time.Since(begin).String()), slog.Bool("mirror", response.fromMirror()))
+	}(time.Now())
+
+	return mw.next.RetrieveSha256Sums(ctx, provider)
+}
+
+func (mw loggingMiddleware) RetrieveSha256SumsSignature(ctx context.Context, provider *core.Provider) (response *retrieveSha256SumsSignatureResponse, err error) {
+	defer func(begin time.Time) {
+		logger := slog.Default().With(
+			slog.String("op", "RetrieveSha256SumsSignature"),
+			slog.Group("provider",
+				slog.String("hostname", provider.Hostname),
+				slog.String("namespace", provider.Namespace),
+				slog.String("name", provider.Name),
+				slog.String("version", provider.Version),
+			),
+		)
+
+		if err != nil {
+			logger.Error("failed to retrieve SHA256SUMS.sig", slog.String("err", err.Error()))
+			return
+		}
+
+		logger.Info("retrieve SHA256SUMS.sig", slog.String("took", time.Since(begin).String()), slog.Bool("mirror", response.fromMirror()))
+	}(time.Now())
+
+	return mw.next.RetrieveSha256SumsSignature(ctx, provider)
+}
+
 // LoggingMiddleware is a logging Service middleware.
 func LoggingMiddleware() Middleware {
 	return func(next Service) Service {

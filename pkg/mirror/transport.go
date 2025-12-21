@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -73,6 +74,38 @@ func MakeHandler(svc Service, auth endpoint.Middleware, metrics *o11y.MirrorMetr
 					options,
 					httptransport.ServerBefore(extractMuxVars(varHostname, varNamespace, varName, varVersion, varOS, varArchitecture)),
 					httptransport.ServerBefore(tokenQueryParamToContext()),
+				)...,
+			),
+		),
+	)
+
+	// SHA256SUMS file endpoint
+	r.Methods("GET").Path(`/{hostname}/{namespace}/{name}/terraform-provider-{nameplaceholder}_{version}_SHA256SUMS`).Handler(
+		instrumentation.WrapHandler(
+			httptransport.NewServer(
+				auth(retrieveSha256SumsEndpoint(svc, metrics)),
+				decodeSha256SumsRequest,
+				encodeSha256SumsResponse,
+				append(
+					options,
+					httptransport.ServerBefore(extractMuxVars(varHostname, varNamespace, varName, varVersion)),
+					httptransport.ServerBefore(jwt.HTTPToContext()),
+				)...,
+			),
+		),
+	)
+
+	// SHA256SUMS.sig file endpoint
+	r.Methods("GET").Path(`/{hostname}/{namespace}/{name}/terraform-provider-{nameplaceholder}_{version}_SHA256SUMS.sig`).Handler(
+		instrumentation.WrapHandler(
+			httptransport.NewServer(
+				auth(retrieveSha256SumsSignatureEndpoint(svc, metrics)),
+				decodeSha256SumsSignatureRequest,
+				encodeSha256SumsSignatureResponse,
+				append(
+					options,
+					httptransport.ServerBefore(extractMuxVars(varHostname, varNamespace, varName, varVersion)),
+					httptransport.ServerBefore(jwt.HTTPToContext()),
 				)...,
 			),
 		),
@@ -159,6 +192,44 @@ func decodeRetrieveProviderArchiveRequest(ctx context.Context, _ *http.Request) 
 
 }
 
+func decodeSha256SumsRequest(ctx context.Context, _ *http.Request) (interface{}, error) {
+	hostname, namespace, name, err := pathPortions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	version, ok := ctx.Value(varVersion).(string)
+	if !ok {
+		return nil, fmt.Errorf("%s path portion missing", string(varVersion))
+	}
+
+	return retrieveSha256SumsRequest{
+		Hostname:  hostname,
+		Namespace: namespace,
+		Name:      name,
+		Version:   version,
+	}, nil
+}
+
+func decodeSha256SumsSignatureRequest(ctx context.Context, _ *http.Request) (interface{}, error) {
+	hostname, namespace, name, err := pathPortions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	version, ok := ctx.Value(varVersion).(string)
+	if !ok {
+		return nil, fmt.Errorf("%s path portion missing", string(varVersion))
+	}
+
+	return retrieveSha256SumsSignatureRequest{
+		Hostname:  hostname,
+		Namespace: namespace,
+		Name:      name,
+		Version:   version,
+	}, nil
+}
+
 func addAuthToken(ctx context.Context, w http.ResponseWriter, response interface{}) error {
 	listResponse, ok := response.(*ListProviderInstallationResponse)
 	if !ok {
@@ -213,6 +284,48 @@ func encodeMirroredResponse(ctx context.Context, w http.ResponseWriter, response
 	return nil
 }
 
+func encodeSha256SumsResponse(ctx context.Context, w http.ResponseWriter, response interface{}) error {
+	sha256SumsResponse, ok := response.(*retrieveSha256SumsResponse)
+	if !ok {
+		return errors.New("failed to type assert to retrieveSha256SumsResponse")
+	}
+
+	// If from upstream (not mirrored), redirect to upstream location
+	if sha256SumsResponse.location != "" {
+		w.Header().Set("Location", sha256SumsResponse.location)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+		return nil
+	}
+
+	// Otherwise, serve the file content directly
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", sha256SumsResponse.fileName))
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write(sha256SumsResponse.content)
+	return err
+}
+
+func encodeSha256SumsSignatureResponse(ctx context.Context, w http.ResponseWriter, response interface{}) error {
+	signatureResponse, ok := response.(*retrieveSha256SumsSignatureResponse)
+	if !ok {
+		return errors.New("failed to type assert to retrieveSha256SumsSignatureResponse")
+	}
+
+	// If from upstream (not mirrored), redirect to upstream location
+	if signatureResponse.location != "" {
+		w.Header().Set("Location", signatureResponse.location)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+		return nil
+	}
+
+	// Otherwise, serve the file content directly
+	w.Header().Set("Content-Type", "application/pgp-signature")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", signatureResponse.fileName))
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write(signatureResponse.content)
+	return err
+}
+
 // ErrorEncoder translates domain specific errors to HTTP status codes
 func ErrorEncoder(_ context.Context, err error, w http.ResponseWriter) {
 	var providerErr *core.ProviderError
@@ -261,4 +374,12 @@ func decodeUpstreamListProviderVersionsResponse(r *http.Response) (*core.Provide
 		return nil, err
 	}
 	return &response, nil
+}
+
+func decodeUpstreamRawFileResponse(r *http.Response) ([]byte, error) {
+	if r.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: status code is %d instead of 200", ErrUpstreamNotFound, r.StatusCode)
+	}
+
+	return io.ReadAll(r.Body)
 }

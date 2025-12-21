@@ -1,9 +1,11 @@
 package mirror
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -26,6 +28,12 @@ type Service interface {
 
 	// RetrieveProviderArchive returns an io.Reader of a zip archive containing the provider binary for a given provider
 	RetrieveProviderArchive(ctx context.Context, provider *core.Provider) (*retrieveProviderArchiveResponse, error)
+
+	// RetrieveSha256Sums returns the SHA256SUMS file for a provider version
+	RetrieveSha256Sums(ctx context.Context, provider *core.Provider) (*retrieveSha256SumsResponse, error)
+
+	// RetrieveSha256SumsSignature returns the SHA256SUMS.sig file for a provider version
+	RetrieveSha256SumsSignature(ctx context.Context, provider *core.Provider) (*retrieveSha256SumsSignatureResponse, error)
 }
 
 type mirror struct {
@@ -73,6 +81,32 @@ func (m *mirror) RetrieveProviderArchive(ctx context.Context, provider *core.Pro
 	}, nil
 }
 
+func (m *mirror) RetrieveSha256Sums(ctx context.Context, provider *core.Provider) (*retrieveSha256SumsResponse, error) {
+	content, err := m.storage.GetMirroredSha256SumsFile(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	return &retrieveSha256SumsResponse{
+		content:      content,
+		fileName:     provider.ShasumFileName(),
+		mirrorSource: mirrorSource{isMirror: true},
+	}, nil
+}
+
+func (m *mirror) RetrieveSha256SumsSignature(ctx context.Context, provider *core.Provider) (*retrieveSha256SumsSignatureResponse, error) {
+	content, err := m.storage.GetMirroredSha256SumsSignatureFile(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	return &retrieveSha256SumsSignatureResponse{
+		content:      content,
+		fileName:     provider.ShasumSignatureFileName(),
+		mirrorSource: mirrorSource{isMirror: true},
+	}, nil
+}
+
 func NewMirror(s Storage) Service {
 	return &mirror{
 		storage: s,
@@ -80,9 +114,11 @@ func NewMirror(s Storage) Service {
 }
 
 type pullThroughMirror struct {
-	upstream upstreamProvider
-	mirror   Service
-	copier   Copier
+	upstream       upstreamProvider
+	mirror         Service
+	copier         Copier
+	syncSha256Sums bool
+	storage        Storage
 }
 
 func (p *pullThroughMirror) ListProviderVersions(ctx context.Context, provider *core.Provider) (*ListProviderVersionsResponse, error) {
@@ -161,6 +197,145 @@ func (p *pullThroughMirror) RetrieveProviderArchive(ctx context.Context, provide
 	}, nil
 }
 
+func (p *pullThroughMirror) RetrieveSha256Sums(ctx context.Context, provider *core.Provider) (*retrieveSha256SumsResponse, error) {
+	// Try to get from storage first (fast path)
+	content, err := p.storage.GetMirroredSha256SumsFile(ctx, provider)
+	if err == nil {
+		return &retrieveSha256SumsResponse{
+			content:      content,
+			fileName:     provider.ShasumFileName(),
+			mirrorSource: mirrorSource{isMirror: true},
+		}, nil
+	}
+
+	// If sync is disabled, return error
+	if !p.syncSha256Sums {
+		return nil, err
+	}
+
+	// Download synchronously from upstream (with caching)
+	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Get provider metadata from upstream to populate URLs
+	upstreamProvider, err := p.upstream.getProvider(syncCtx, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	// Download both SHA256SUMS and signature file using cached methods
+	sha256sumsContent, err := p.upstream.getSha256SumsFile(syncCtx, upstreamProvider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download SHA256SUMS from upstream: %w", err)
+	}
+
+	signatureContent, err := p.upstream.getSha256SumsSignatureFile(syncCtx, upstreamProvider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download SHA256SUMS.sig from upstream: %w", err)
+	}
+
+	// Upload both files to storage
+	if err := p.storage.UploadMirroredFile(syncCtx, provider, provider.ShasumFileName(), bytes.NewReader(sha256sumsContent)); err != nil {
+		return nil, fmt.Errorf("failed to upload SHA256SUMS to mirror: %w", err)
+	}
+
+	if err := p.storage.UploadMirroredFile(syncCtx, provider, provider.ShasumSignatureFileName(), bytes.NewReader(signatureContent)); err != nil {
+		return nil, fmt.Errorf("failed to upload SHA256SUMS.sig to mirror: %w", err)
+	}
+
+	slog.Info("successfully synchronized SHA256SUMS files",
+		slog.String("hostname", provider.Hostname),
+		slog.String("namespace", provider.Namespace),
+		slog.String("name", provider.Name),
+		slog.String("version", provider.Version))
+
+	return &retrieveSha256SumsResponse{
+		content:      sha256sumsContent,
+		fileName:     provider.ShasumFileName(),
+		mirrorSource: mirrorSource{isMirror: true},
+	}, nil
+}
+
+func (p *pullThroughMirror) RetrieveSha256SumsSignature(ctx context.Context, provider *core.Provider) (*retrieveSha256SumsSignatureResponse, error) {
+	// Try to get from storage first (fast path)
+	content, err := p.storage.GetMirroredSha256SumsSignatureFile(ctx, provider)
+	if err == nil {
+		return &retrieveSha256SumsSignatureResponse{
+			content:      content,
+			fileName:     provider.ShasumSignatureFileName(),
+			mirrorSource: mirrorSource{isMirror: true},
+		}, nil
+	}
+
+	// If sync is disabled, return error
+	if !p.syncSha256Sums {
+		return nil, err
+	}
+
+	// Download synchronously from upstream (with caching)
+	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Get provider metadata from upstream to populate URLs
+	upstreamProvider, err := p.upstream.getProvider(syncCtx, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	// Download both SHA256SUMS and signature file using cached methods
+	sha256sumsContent, err := p.upstream.getSha256SumsFile(syncCtx, upstreamProvider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download SHA256SUMS from upstream: %w", err)
+	}
+
+	signatureContent, err := p.upstream.getSha256SumsSignatureFile(syncCtx, upstreamProvider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download SHA256SUMS.sig from upstream: %w", err)
+	}
+
+	// Upload both files to storage
+	if err := p.storage.UploadMirroredFile(syncCtx, provider, provider.ShasumFileName(), bytes.NewReader(sha256sumsContent)); err != nil {
+		return nil, fmt.Errorf("failed to upload SHA256SUMS to mirror: %w", err)
+	}
+
+	if err := p.storage.UploadMirroredFile(syncCtx, provider, provider.ShasumSignatureFileName(), bytes.NewReader(signatureContent)); err != nil {
+		return nil, fmt.Errorf("failed to upload SHA256SUMS.sig to mirror: %w", err)
+	}
+
+	slog.Info("successfully synchronized SHA256SUMS.sig files",
+		slog.String("hostname", provider.Hostname),
+		slog.String("namespace", provider.Namespace),
+		slog.String("name", provider.Name),
+		slog.String("version", provider.Version))
+
+	return &retrieveSha256SumsSignatureResponse{
+		content:      signatureContent,
+		fileName:     provider.ShasumSignatureFileName(),
+		mirrorSource: mirrorSource{isMirror: true},
+	}, nil
+}
+
+// downloadFile downloads a file from the given URL and returns its content
+func downloadFile(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to download file: status %d", resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
 func (p *pullThroughMirror) upstreamSha256Sums(ctx context.Context, provider *core.Provider, versions *core.ProviderVersions) (*core.Sha256Sums, error) {
 	if len(versions.Versions) == 0 {
 		return nil, errors.New("core.ProviderVersions doesn't contain any versions")
@@ -191,7 +366,7 @@ func (p *pullThroughMirror) upstreamSha256Sums(ctx context.Context, provider *co
 	return p.upstream.shaSums(ctx, providerUpstream)
 }
 
-func NewPullThroughMirror(s Storage, c Copier, cacheConfig CacheConfig) Service {
+func NewPullThroughMirror(s Storage, c Copier, cacheConfig CacheConfig, syncSha256Sums bool) Service {
 	remoteServiceDiscovery := discovery.NewRemoteServiceDiscovery(http.DefaultClient)
 
 	// Create the base upstream which consumes the remote API
@@ -213,11 +388,11 @@ func NewPullThroughMirror(s Storage, c Copier, cacheConfig CacheConfig) Service 
 	}
 
 	svc := &pullThroughMirror{
-		upstream: upstream,
-		mirror: &mirror{
-			storage: s,
-		},
-		copier: c,
+		upstream:       upstream,
+		mirror:         &mirror{storage: s},
+		copier:         c,
+		syncSha256Sums: syncSha256Sums,
+		storage:        s,
 	}
 
 	return svc

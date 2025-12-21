@@ -331,6 +331,18 @@ func (s *GCSStorage) MirroredSha256Sum(ctx context.Context, provider *core.Provi
 	return core.NewSha256Sums(provider.ShasumFileName(), bytes.NewReader(shaSumBytes))
 }
 
+func (s *GCSStorage) GetMirroredSha256SumsFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	prefix := providerStoragePrefix(s.bucketPrefix, mirrorProviderType, provider.Hostname, provider.Namespace, provider.Name)
+	key := filepath.Join(prefix, provider.ShasumFileName())
+	return s.download(ctx, key)
+}
+
+func (s *GCSStorage) GetMirroredSha256SumsSignatureFile(ctx context.Context, provider *core.Provider) ([]byte, error) {
+	prefix := providerStoragePrefix(s.bucketPrefix, mirrorProviderType, provider.Hostname, provider.Namespace, provider.Name)
+	key := filepath.Join(prefix, provider.ShasumSignatureFileName())
+	return s.download(ctx, key)
+}
+
 func (s *GCSStorage) upload(ctx context.Context, key string, reader io.Reader, overwrite bool) error {
 	if !overwrite {
 		exists, err := s.objectExists(ctx, key)

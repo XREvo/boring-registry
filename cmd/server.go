@@ -82,6 +82,9 @@ var (
 	flagProviderNetworkMirrorPullThroughCacheEnabled bool
 	flagProviderNetworkMirrorPullThroughCacheTTL     uint
 	flagProviderNetworkMirrorPullThroughCacheSize    uint
+
+	// Provider Network Mirror SHA256SUMS sync option
+	flagProviderNetworkMirrorPullThroughSyncSha256Sums bool
 )
 
 var serverCmd = &cobra.Command{
@@ -224,6 +227,7 @@ func init() {
 	serverCmd.Flags().BoolVar(&flagProviderNetworkMirrorPullThroughCacheEnabled, "network-mirror-pull-through-cache-enabled", false, "Enable in-memory cache for pull-through mirror")
 	serverCmd.Flags().UintVar(&flagProviderNetworkMirrorPullThroughCacheTTL, "network-mirror-pull-through-cache-ttl", 24, "Cache TTL in hours")
 	serverCmd.Flags().UintVar(&flagProviderNetworkMirrorPullThroughCacheSize, "network-mirror-pull-through-cache-size", 16, "Cache maximum size in MB")
+	serverCmd.Flags().BoolVar(&flagProviderNetworkMirrorPullThroughSyncSha256Sums, "network-mirror-pull-through-sync-shasums", false, "Download SHA256SUMS files synchronously from upstream when not in storage. Only effective with --network-mirror-pull-through enabled")
 }
 
 func serveMux(ctx context.Context) (*http.ServeMux, error) {
@@ -275,7 +279,7 @@ func serveMux(ctx context.Context) (*http.ServeMux, error) {
 				MaxSizeMB: uint64(flagProviderNetworkMirrorPullThroughCacheSize),
 			}
 
-			svc = mirror.NewPullThroughMirror(s, copier, cacheConfig)
+			svc = mirror.NewPullThroughMirror(s, copier, cacheConfig, flagProviderNetworkMirrorPullThroughSyncSha256Sums)
 		} else {
 			svc = mirror.NewMirror(s)
 		}

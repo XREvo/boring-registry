@@ -27,4 +27,10 @@ type Storage interface {
 
 	// Retrieve the SHA256SUM from storage
 	MirroredSha256Sum(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error)
+
+	// GetMirroredSha256SumsFile retrieves the raw SHA256SUMS file
+	GetMirroredSha256SumsFile(ctx context.Context, provider *core.Provider) ([]byte, error)
+
+	// GetMirroredSha256SumsSignatureFile retrieves the raw SHA256SUMS.sig file
+	GetMirroredSha256SumsSignatureFile(ctx context.Context, provider *core.Provider) ([]byte, error)
 }

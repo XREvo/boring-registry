@@ -10,10 +10,12 @@ import (
 	"github.com/boring-registry/boring-registry/pkg/discovery"
 )
 
-type upstreamProvider interface {
-	listProviderVersions(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error)
-	getProvider(ctx context.Context, provider *core.Provider) (*core.Provider, error)
-	shaSums(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error)
+// UpstreamProvider defines the interface for fetching provider data from an upstream registry.
+// This interface is exported to allow reuse in the seamless mirror feature.
+type UpstreamProvider interface {
+	ListProviderVersions(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error)
+	GetProvider(ctx context.Context, provider *core.Provider) (*core.Provider, error)
+	ShaSums(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error)
 }
 
 type upstreamProviderRegistry struct {
@@ -21,7 +23,7 @@ type upstreamProviderRegistry struct {
 	remoteServiceDiscovery discovery.ServiceDiscoveryResolver
 }
 
-func (u *upstreamProviderRegistry) listProviderVersions(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error) {
+func (u *upstreamProviderRegistry) ListProviderVersions(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error) {
 	discovered, err := u.remoteServiceDiscovery.Resolve(ctx, provider.Hostname)
 	if err != nil {
 		return nil, err
@@ -44,7 +46,7 @@ func (u *upstreamProviderRegistry) listProviderVersions(ctx context.Context, pro
 	return decodeUpstreamListProviderVersionsResponse(resp)
 }
 
-func (u *upstreamProviderRegistry) getProvider(ctx context.Context, provider *core.Provider) (*core.Provider, error) {
+func (u *upstreamProviderRegistry) GetProvider(ctx context.Context, provider *core.Provider) (*core.Provider, error) {
 	discovered, err := u.remoteServiceDiscovery.Resolve(ctx, provider.Hostname)
 	if err != nil {
 		return nil, err
@@ -78,7 +80,7 @@ func (u *upstreamProviderRegistry) getProvider(ctx context.Context, provider *co
 	return decoded, err
 }
 
-func (u *upstreamProviderRegistry) shaSums(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error) {
+func (u *upstreamProviderRegistry) ShaSums(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.SHASumsURL, nil)
 	if err != nil {
 		return nil, err
@@ -98,7 +100,9 @@ func (u *upstreamProviderRegistry) shaSums(ctx context.Context, provider *core.P
 	return sha256Sums, nil
 }
 
-func newUpstreamProviderRegistry(remoteServiceDiscovery discovery.ServiceDiscoveryResolver) *upstreamProviderRegistry {
+// NewUpstreamProviderRegistry creates a new upstream provider registry client.
+// This constructor is exported to allow reuse in the seamless mirror feature.
+func NewUpstreamProviderRegistry(remoteServiceDiscovery discovery.ServiceDiscoveryResolver) UpstreamProvider {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConnsPerHost = 100
 	return &upstreamProviderRegistry{

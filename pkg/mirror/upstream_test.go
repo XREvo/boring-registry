@@ -105,7 +105,7 @@ func Test_upstreamProviderRegistry_listProviderVersions(t *testing.T) {
 				remoteServiceDiscovery: newMockedServiceDiscovery(server),
 			}
 
-			got, err := u.listProviderVersions(context.Background(), tt.provider)
+			got, err := u.ListProviderVersions(context.Background(), tt.provider)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("upstreamProviderRegistry.listProviderVersions() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -196,7 +196,7 @@ func Test_upstreamProviderRegistry_getProvider(t *testing.T) {
 				remoteServiceDiscovery: newMockedServiceDiscovery(server),
 			}
 
-			got, err := u.getProvider(context.Background(), tt.provider)
+			got, err := u.GetProvider(context.Background(), tt.provider)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("upstreamProviderRegistry.getProvider() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -260,7 +260,7 @@ func Test_upstreamProviderRegistry_shaSums(t *testing.T) {
 			}
 			tt.provider.SHASumsURL = server.URL
 
-			got, err := u.shaSums(context.Background(), tt.provider)
+			got, err := u.ShaSums(context.Background(), tt.provider)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("upstreamProviderRegistry.shaSums() error = %v, wantErr %v", err, tt.wantErr)
 				return

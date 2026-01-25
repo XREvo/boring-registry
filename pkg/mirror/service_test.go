@@ -19,15 +19,15 @@ type mockedUpstreamProvider struct {
 	customShaSums              func(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error)
 }
 
-func (m *mockedUpstreamProvider) listProviderVersions(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error) {
+func (m *mockedUpstreamProvider) ListProviderVersions(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error) {
 	return m.customListProviderVersions(ctx, provider)
 }
 
-func (m *mockedUpstreamProvider) getProvider(ctx context.Context, provider *core.Provider) (*core.Provider, error) {
+func (m *mockedUpstreamProvider) GetProvider(ctx context.Context, provider *core.Provider) (*core.Provider, error) {
 	return m.customGetProvider(ctx, provider)
 }
 
-func (m *mockedUpstreamProvider) shaSums(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error) {
+func (m *mockedUpstreamProvider) ShaSums(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error) {
 	return m.customShaSums(ctx, provider)
 }
 

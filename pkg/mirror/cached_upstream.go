@@ -27,9 +27,9 @@ type cacheEntry struct {
 	sizeBytes int
 }
 
-// Wraps an upstreamProvider with caching
+// Wraps an UpstreamProvider with caching
 type cachedUpstreamProvider struct {
-	upstream upstreamProvider
+	upstream UpstreamProvider
 	cache    *otter.Cache[string, *cacheEntry]
 	config   CacheConfig
 	metrics  *o11y.MirrorMetrics
@@ -63,8 +63,8 @@ func estimateSize(data interface{}) (int, error) {
 	return len(bytes), nil
 }
 
-// Implements upstreamProvider's listProviderVersions method, with caching
-func (c *cachedUpstreamProvider) listProviderVersions(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error) {
+// Implements UpstreamProvider's ListProviderVersions method, with caching
+func (c *cachedUpstreamProvider) ListProviderVersions(ctx context.Context, provider *core.Provider) (*core.ProviderVersions, error) {
 	key := buildVersionsKey(provider)
 
 	// Try to get from cache
@@ -80,7 +80,7 @@ func (c *cachedUpstreamProvider) listProviderVersions(ctx context.Context, provi
 	}
 
 	// Cache miss - call upstream
-	versions, err := c.upstream.listProviderVersions(ctx, provider)
+	versions, err := c.upstream.ListProviderVersions(ctx, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -103,8 +103,8 @@ func (c *cachedUpstreamProvider) listProviderVersions(ctx context.Context, provi
 	return versions, nil
 }
 
-// Implements upstreamProvider's getProvider method, with caching
-func (c *cachedUpstreamProvider) getProvider(ctx context.Context, provider *core.Provider) (*core.Provider, error) {
+// Implements UpstreamProvider's GetProvider method, with caching
+func (c *cachedUpstreamProvider) GetProvider(ctx context.Context, provider *core.Provider) (*core.Provider, error) {
 	key := buildProviderKey(provider)
 
 	// Try to get from cache
@@ -123,7 +123,7 @@ func (c *cachedUpstreamProvider) getProvider(ctx context.Context, provider *core
 	}
 
 	// Cache miss - call upstream
-	prov, err := c.upstream.getProvider(ctx, provider)
+	prov, err := c.upstream.GetProvider(ctx, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -146,8 +146,8 @@ func (c *cachedUpstreamProvider) getProvider(ctx context.Context, provider *core
 	return prov, nil
 }
 
-// Implements upstreamProvider's shaSums method, with caching
-func (c *cachedUpstreamProvider) shaSums(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error) {
+// Implements UpstreamProvider's ShaSums method, with caching
+func (c *cachedUpstreamProvider) ShaSums(ctx context.Context, provider *core.Provider) (*core.Sha256Sums, error) {
 	key := buildShaSumsKey(provider)
 
 	// Try to get from cache
@@ -164,7 +164,7 @@ func (c *cachedUpstreamProvider) shaSums(ctx context.Context, provider *core.Pro
 	}
 
 	// Cache miss - call upstream
-	sums, err := c.upstream.shaSums(ctx, provider)
+	sums, err := c.upstream.ShaSums(ctx, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -187,8 +187,9 @@ func (c *cachedUpstreamProvider) shaSums(ctx context.Context, provider *core.Pro
 	return sums, nil
 }
 
-// Creates a new upstream provider wrapper with caching
-func newCachedUpstreamProvider(upstream upstreamProvider, config CacheConfig, metrics *o11y.MirrorMetrics) (*cachedUpstreamProvider, error) {
+// NewCachedUpstreamProvider creates a new upstream provider wrapper with caching.
+// This constructor is exported to allow reuse in the seamless mirror feature.
+func NewCachedUpstreamProvider(upstream UpstreamProvider, config CacheConfig, metrics *o11y.MirrorMetrics) (UpstreamProvider, error) {
 	// Convert MB to bytes
 	maxWeightBytes := config.MaxSizeMB * 1024 * 1024
 

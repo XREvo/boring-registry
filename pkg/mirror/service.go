@@ -81,7 +81,7 @@ func NewMirror(s Storage) Service {
 }
 
 type pullThroughMirror struct {
-	upstream upstreamProvider
+	upstream UpstreamProvider
 	mirror   Service
 	copier   Copier
 }
@@ -89,7 +89,7 @@ type pullThroughMirror struct {
 func (p *pullThroughMirror) ListProviderVersions(ctx context.Context, provider *core.Provider) (*ListProviderVersionsResponse, error) {
 	upstreamCtx, cancelUpstreamCtx := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelUpstreamCtx()
-	providerVersionsResponse, err := p.upstream.listProviderVersions(upstreamCtx, provider)
+	providerVersionsResponse, err := p.upstream.ListProviderVersions(upstreamCtx, provider)
 	if err == nil {
 		// The request to the upstream registry was successful, we can transform and return the response
 		return toListProviderVersionsResponse(providerVersionsResponse), nil
@@ -108,7 +108,7 @@ func (p *pullThroughMirror) ListProviderVersions(ctx context.Context, provider *
 func (p *pullThroughMirror) ListProviderInstallation(ctx context.Context, provider *core.Provider) (*ListProviderInstallationResponse, error) {
 	upstreamCtx, cancelUpstreamCtx := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelUpstreamCtx()
-	response, err := p.upstream.listProviderVersions(upstreamCtx, provider)
+	response, err := p.upstream.ListProviderVersions(upstreamCtx, provider)
 	if err != nil {
 		var urlError *url.Error
 		if isUrlError := errors.As(err, &urlError); !isUrlError {
@@ -148,13 +148,13 @@ func (p *pullThroughMirror) RetrieveProviderArchive(ctx context.Context, provide
 	}
 
 	// If not, then redirect to upstream download and start the mirror process
-	upstream, err := p.upstream.getProvider(ctx, provider)
+	upstream, err := p.upstream.GetProvider(ctx, provider)
 	if err != nil {
 		return nil, err
 	}
 
 	// Download the provider from upstream and upload to the mirror
-	go p.copier.copy(upstream)
+	go p.copier.Copy(upstream)
 
 	return &retrieveProviderArchiveResponse{
 		location:     upstream.DownloadURL,
@@ -185,22 +185,22 @@ func (p *pullThroughMirror) upstreamSha256Sums(ctx context.Context, provider *co
 		return nil, errors.New("core.ProviderVersions doesn't contain any OS and/or Arch")
 	}
 
-	providerUpstream, err := p.upstream.getProvider(ctx, clone)
+	providerUpstream, err := p.upstream.GetProvider(ctx, clone)
 	if err != nil {
 		return nil, err
 	}
-	return p.upstream.shaSums(ctx, providerUpstream)
+	return p.upstream.ShaSums(ctx, providerUpstream)
 }
 
 func NewPullThroughMirror(s Storage, c Copier, cacheConfig CacheConfig, metrics *o11y.MirrorMetrics) (Service, error) {
 	remoteServiceDiscovery := discovery.NewRemoteServiceDiscovery(http.DefaultClient)
 
 	// Create the base upstream which consumes the remote API
-	var upstream upstreamProvider = newUpstreamProviderRegistry(remoteServiceDiscovery)
+	var upstream UpstreamProvider = NewUpstreamProviderRegistry(remoteServiceDiscovery)
 
 	// Wrap with cache if enabled
 	if cacheConfig.Enabled {
-		cachedUpstream, err := newCachedUpstreamProvider(upstream, cacheConfig, metrics)
+		cachedUpstream, err := NewCachedUpstreamProvider(upstream, cacheConfig, metrics)
 		if err != nil {
 			return nil, err
 		} else {

@@ -82,6 +82,13 @@ var (
 	flagProviderNetworkMirrorPullThroughCacheEnabled bool
 	flagProviderNetworkMirrorPullThroughCacheTTL     time.Duration
 	flagProviderNetworkMirrorPullThroughCacheSize    int
+
+	// Seamless Mirror options
+	flagSeamlessMirrorEnabled      bool
+	flagSeamlessMirrorUpstream     string
+	flagSeamlessMirrorCacheEnabled bool
+	flagSeamlessMirrorCacheTTL     time.Duration
+	flagSeamlessMirrorCacheSize    int
 )
 
 var serverCmd = &cobra.Command{
@@ -224,6 +231,13 @@ func init() {
 	serverCmd.Flags().BoolVar(&flagProviderNetworkMirrorPullThroughCacheEnabled, "network-mirror-pull-through-cache-enabled", false, "Enable in-memory cache for pull-through mirror")
 	serverCmd.Flags().DurationVar(&flagProviderNetworkMirrorPullThroughCacheTTL, "network-mirror-pull-through-cache-ttl", 24*time.Hour, "Cache TTL in hours")
 	serverCmd.Flags().IntVar(&flagProviderNetworkMirrorPullThroughCacheSize, "network-mirror-pull-through-cache-size", 16, "Cache maximum size in MB by upstream registry")
+
+	// Seamless Mirror options
+	serverCmd.Flags().BoolVar(&flagSeamlessMirrorEnabled, "seamless-mirror", false, "Enable seamless mirror mode for providers and modules. When enabled, providers/modules not found locally are fetched from the upstream registry and cached")
+	serverCmd.Flags().StringVar(&flagSeamlessMirrorUpstream, "seamless-mirror-upstream", "registry.terraform.io", "Hostname of the upstream registry for seamless mirror mode")
+	serverCmd.Flags().BoolVar(&flagSeamlessMirrorCacheEnabled, "seamless-mirror-cache-enabled", false, "Enable in-memory cache for seamless mirror upstream requests")
+	serverCmd.Flags().DurationVar(&flagSeamlessMirrorCacheTTL, "seamless-mirror-cache-ttl", 24*time.Hour, "Cache TTL for seamless mirror")
+	serverCmd.Flags().IntVar(&flagSeamlessMirrorCacheSize, "seamless-mirror-cache-size", 16, "Cache maximum size in MB for seamless mirror")
 }
 
 func serveMux(ctx context.Context) (*http.ServeMux, error) {
@@ -253,7 +267,7 @@ func serveMux(ctx context.Context) (*http.ServeMux, error) {
 		return nil, err
 	}
 
-	if err := registerProvider(mux, s, authMiddleware, metrics.Provider, instrumentation, proxyUrlService); err != nil {
+	if err := registerProvider(ctx, mux, s, authMiddleware, metrics.Provider, metrics.Mirror, instrumentation, proxyUrlService); err != nil {
 		return nil, err
 	}
 
@@ -443,11 +457,41 @@ func registerModule(mux *http.ServeMux, s storage.Storage, auth endpoint.Middlew
 	return nil
 }
 
-func registerProvider(mux *http.ServeMux, s storage.Storage, authMiddleware endpoint.Middleware, metrics *o11y.ProviderMetrics, instrumentation o11y.Middleware, proxyUrlService core.ProxyUrlService) error {
-	service := provider.NewService(s, proxyUrlService)
-	{
-		service = provider.LoggingMiddleware()(service)
+func registerProvider(ctx context.Context, mux *http.ServeMux, s storage.Storage, authMiddleware endpoint.Middleware, metrics *o11y.ProviderMetrics, mirrorMetrics *o11y.MirrorMetrics, instrumentation o11y.Middleware, proxyUrlService core.ProxyUrlService) error {
+	var svc provider.Service = provider.NewService(s, proxyUrlService)
+
+	// Wrap with seamless mirror if enabled
+	if flagSeamlessMirrorEnabled {
+		remoteServiceDiscovery := discovery.NewRemoteServiceDiscovery(http.DefaultClient)
+		var upstream mirror.UpstreamProvider = mirror.NewUpstreamProviderRegistry(remoteServiceDiscovery)
+
+		// Wrap upstream with cache if enabled
+		if flagSeamlessMirrorCacheEnabled {
+			cacheConfig := mirror.CacheConfig{
+				Enabled:   true,
+				TTL:       flagSeamlessMirrorCacheTTL,
+				MaxSizeMB: flagSeamlessMirrorCacheSize,
+			}
+			cachedUpstream, err := mirror.NewCachedUpstreamProvider(upstream, cacheConfig, mirrorMetrics)
+			if err != nil {
+				return fmt.Errorf("failed to create cached upstream provider: %w", err)
+			}
+			slog.Info("seamless mirror cache enabled for providers",
+				slog.Duration("ttl", cacheConfig.TTL),
+				slog.Int("max_size_mb", cacheConfig.MaxSizeMB))
+			upstream = cachedUpstream
+		}
+
+		copier := mirror.NewCopier(ctx, s)
+		config := provider.SeamlessMirrorConfig{
+			UpstreamHostname: flagSeamlessMirrorUpstream,
+		}
+		svc = provider.NewSeamlessMirrorService(svc, s, upstream, copier, config)
+		slog.Info("seamless mirror enabled for providers",
+			slog.String("upstream", flagSeamlessMirrorUpstream))
 	}
+
+	service := provider.LoggingMiddleware()(svc)
 
 	opts := []httptransport.ServerOption{
 		httptransport.ServerErrorEncoder(provider.ErrorEncoder),

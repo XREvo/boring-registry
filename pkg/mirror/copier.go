@@ -12,8 +12,8 @@ import (
 )
 
 type Copier interface {
-	// copy copies the artifacts of a provider to the pull-through cache/mirror
-	copy(provider *core.Provider)
+	// Copy copies the artifacts of a provider to the pull-through cache/mirror
+	Copy(provider *core.Provider)
 }
 
 // copier implements Copier and ensures that requested providers are replicated to the internal storage asynchronously
@@ -26,8 +26,8 @@ type copier struct {
 	logger  *slog.Logger
 }
 
-// copy should be started in a separate goroutine
-func (c *copier) copy(provider *core.Provider) {
+// Copy should be started in a separate goroutine
+func (c *copier) Copy(provider *core.Provider) {
 	begin := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()

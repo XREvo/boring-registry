@@ -129,6 +129,98 @@ func (s *AzureStorage) UploadModule(ctx context.Context, namespace, name, provid
 	return m, nil
 }
 
+// GetMirroredModule retrieves information about a mirrored module from the Azure Storage.
+func (s *AzureStorage) GetMirroredModule(ctx context.Context, hostname, namespace, name, provider, version string) (core.Module, error) {
+	key := mirrorModulePath(s.prefix, hostname, namespace, name, provider, version, s.moduleArchiveFormat)
+
+	exists, err := s.objectExists(ctx, key)
+	if err != nil {
+		return core.Module{}, err
+	} else if !exists {
+		return core.Module{}, module.ErrModuleNotFound
+	}
+
+	presigned, err := s.presignedURL(ctx, key)
+	if err != nil {
+		return core.Module{}, err
+	}
+
+	return core.Module{
+		Namespace:   namespace,
+		Name:        name,
+		Provider:    provider,
+		Version:     version,
+		DownloadURL: presigned,
+	}, nil
+}
+
+// ListMirroredModuleVersions lists all versions of a mirrored module from the Azure Storage.
+func (s *AzureStorage) ListMirroredModuleVersions(ctx context.Context, hostname, namespace, name, provider string) ([]core.Module, error) {
+	prefix := mirrorModulePathPrefix(s.prefix, hostname, namespace, name, provider)
+
+	var modules []core.Module
+	pager := s.client.NewListBlobsFlatPager(s.container, &azblob.ListBlobsFlatOptions{
+		Prefix: &prefix,
+	})
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%v: %w", module.ErrModuleListFailed, err)
+		}
+
+		for _, obj := range page.Segment.BlobItems {
+			m, _, err := mirrorModuleFromObject(*obj.Name, s.moduleArchiveFormat)
+			if err != nil {
+				continue
+			}
+
+			m.DownloadURL, err = s.presignedURL(ctx, mirrorModulePath(s.prefix, hostname, m.Namespace, m.Name, m.Provider, m.Version, s.moduleArchiveFormat))
+			if err != nil {
+				return []core.Module{}, err
+			}
+
+			modules = append(modules, *m)
+		}
+	}
+
+	return modules, nil
+}
+
+// UploadMirroredModule uploads a module to the Azure mirror storage.
+func (s *AzureStorage) UploadMirroredModule(ctx context.Context, hostname, namespace, name, provider, version string, body io.Reader) (core.Module, error) {
+	if hostname == "" {
+		return core.Module{}, errors.New("hostname not defined")
+	}
+
+	if namespace == "" {
+		return core.Module{}, errors.New("namespace not defined")
+	}
+
+	if name == "" {
+		return core.Module{}, errors.New("name not defined")
+	}
+
+	if provider == "" {
+		return core.Module{}, errors.New("provider not defined")
+	}
+
+	if version == "" {
+		return core.Module{}, errors.New("version not defined")
+	}
+
+	key := mirrorModulePath(s.prefix, hostname, namespace, name, provider, version, DefaultModuleArchiveFormat)
+
+	if err := s.upload(ctx, key, body, true); err != nil {
+		return core.Module{}, fmt.Errorf("%v: %w", module.ErrModuleUploadFailed, err)
+	}
+
+	m, err := s.GetMirroredModule(ctx, hostname, namespace, name, provider, version)
+	if err != nil {
+		return core.Module{}, fmt.Errorf("retrieving module after upload failed: %w", err)
+	}
+	return m, nil
+}
+
 // GetProvider retrieves information about a provider from the Azure Storage.
 func (s *AzureStorage) getProvider(ctx context.Context, pt providerType, provider *core.Provider) (*core.Provider, error) {
 	var archivePath, shasumPath, shasumSigPath string

@@ -263,7 +263,7 @@ func serveMux(ctx context.Context) (*http.ServeMux, error) {
 
 	proxyUrlService := core.NewProxyUrlService(flagProxy, prefixProxy)
 
-	if err := registerModule(mux, s, authMiddleware, metrics.Module, instrumentation, proxyUrlService); err != nil {
+	if err := registerModule(ctx, mux, s, authMiddleware, metrics.Module, instrumentation, proxyUrlService); err != nil {
 		return nil, err
 	}
 
@@ -427,11 +427,41 @@ func registerDiscovery(mux *http.ServeMux, login *discovery.LoginV1) error {
 	return nil
 }
 
-func registerModule(mux *http.ServeMux, s storage.Storage, auth endpoint.Middleware, metrics *o11y.ModuleMetrics, instrumentation o11y.Middleware, proxyUrlService core.ProxyUrlService) error {
-	service := module.NewService(s, proxyUrlService)
-	{
-		service = module.LoggingMiddleware()(service)
+func registerModule(ctx context.Context, mux *http.ServeMux, s storage.Storage, auth endpoint.Middleware, metrics *o11y.ModuleMetrics, instrumentation o11y.Middleware, proxyUrlService core.ProxyUrlService) error {
+	var svc module.Service = module.NewService(s, proxyUrlService)
+
+	// Wrap with seamless mirror if enabled
+	if flagSeamlessMirrorEnabled {
+		remoteServiceDiscovery := discovery.NewRemoteServiceDiscovery(http.DefaultClient)
+		var upstream module.UpstreamModule = module.NewUpstreamModuleRegistry(remoteServiceDiscovery)
+
+		// Wrap upstream with cache if enabled
+		if flagSeamlessMirrorCacheEnabled {
+			cacheConfig := module.CacheConfig{
+				Enabled:   true,
+				TTL:       flagSeamlessMirrorCacheTTL,
+				MaxSizeMB: flagSeamlessMirrorCacheSize,
+			}
+			cachedUpstream, err := module.NewCachedUpstreamModule(upstream, cacheConfig, metrics)
+			if err != nil {
+				return fmt.Errorf("failed to create cached upstream module: %w", err)
+			}
+			slog.Info("seamless mirror cache enabled for modules",
+				slog.Duration("ttl", cacheConfig.TTL),
+				slog.Int("max_size_mb", cacheConfig.MaxSizeMB))
+			upstream = cachedUpstream
+		}
+
+		copier := module.NewModuleCopier(ctx, s)
+		config := module.SeamlessMirrorConfig{
+			UpstreamHostname: flagSeamlessMirrorUpstream,
+		}
+		svc = module.NewSeamlessMirrorModuleService(svc, s, upstream, copier, config)
+		slog.Info("seamless mirror enabled for modules",
+			slog.String("upstream", flagSeamlessMirrorUpstream))
 	}
+
+	service := module.LoggingMiddleware()(svc)
 
 	opts := []httptransport.ServerOption{
 		httptransport.ServerErrorEncoder(module.ErrorEncoder),

@@ -63,6 +63,12 @@ type SeamlessMirrorMetrics struct {
 	ProviderLocalHits *prometheus.CounterVec
 	// ProviderMirrorHits counts hits from mirror storage
 	ProviderMirrorHits *prometheus.CounterVec
+	// ModuleUpstreamRequests counts upstream requests for modules
+	ModuleUpstreamRequests *prometheus.CounterVec
+	// ModuleLocalHits counts hits from local storage
+	ModuleLocalHits *prometheus.CounterVec
+	// ModuleMirrorHits counts hits from mirror storage
+	ModuleMirrorHits *prometheus.CounterVec
 }
 
 func NewMetrics(buckets []float64) *ServerMetrics {
@@ -225,6 +231,33 @@ func NewMetrics(buckets []float64) *ServerMetrics {
 					Help:      "The total number of provider hits from mirror storage",
 				},
 				[]string{HostnameLabel, NamespaceLabel, NameLabel},
+			),
+			ModuleUpstreamRequests: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Namespace: boringNamespace,
+					Subsystem: seamlessMirrorSubsystem,
+					Name:      "module_upstream_requests_total",
+					Help:      "The total number of module requests to upstream registry",
+				},
+				[]string{HostnameLabel, NamespaceLabel, NameLabel, ProviderLabel},
+			),
+			ModuleLocalHits: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Namespace: boringNamespace,
+					Subsystem: seamlessMirrorSubsystem,
+					Name:      "module_local_hits_total",
+					Help:      "The total number of module hits from local storage",
+				},
+				[]string{NamespaceLabel, NameLabel, ProviderLabel},
+			),
+			ModuleMirrorHits: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Namespace: boringNamespace,
+					Subsystem: seamlessMirrorSubsystem,
+					Name:      "module_mirror_hits_total",
+					Help:      "The total number of module hits from mirror storage",
+				},
+				[]string{HostnameLabel, NamespaceLabel, NameLabel, ProviderLabel},
 			),
 		},
 		Http: &HttpMetrics{

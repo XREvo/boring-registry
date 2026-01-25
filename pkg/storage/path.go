@@ -14,6 +14,7 @@ const (
 	internalProviderType = providerType("providers")
 	mirrorProviderType   = providerType("mirror/providers")
 	internalModuleType   = moduleType("modules")
+	mirrorModuleType     = moduleType("mirror/modules")
 
 	SigningKeyFileName = "signing-keys.json"
 )
@@ -73,6 +74,19 @@ func modulePathPrefix(prefix, namespace, name, provider string) string {
 func modulePath(prefix, namespace, name, provider, version, archiveFormat string) string {
 	f := fmt.Sprintf("%s-%s-%s-%s.%s", namespace, name, provider, version, archiveFormat)
 	return path.Join(modulePathPrefix(prefix, namespace, name, provider), f)
+}
+
+// mirrorModulePathPrefix returns a <prefix>/mirror/modules/<hostname>/<namespace>/<name>/<provider> prefix
+func mirrorModulePathPrefix(prefix, hostname, namespace, name, provider string) string {
+	if hostname == "" {
+		panic("hostname must not be empty for mirrored module storage")
+	}
+	return path.Join(prefix, string(mirrorModuleType), hostname, namespace, name, provider)
+}
+
+func mirrorModulePath(prefix, hostname, namespace, name, provider, version, archiveFormat string) string {
+	f := fmt.Sprintf("%s-%s-%s-%s.%s", namespace, name, provider, version, archiveFormat)
+	return path.Join(mirrorModulePathPrefix(prefix, hostname, namespace, name, provider), f)
 }
 
 func signingKeysPath(prefix string, pt providerType, hostname, namespace string) string {
@@ -143,4 +157,56 @@ func moduleFromObject(key string, fileExtension string) (*core.Module, error) {
 		Provider:  dirParts[2],
 		Version:   version,
 	}, nil
+}
+
+// mirrorModuleFromObject parses a mirrored module from its storage key.
+// Expected path format: <prefix>/mirror/modules/<hostname>/<namespace>/<name>/<provider>/<namespace>-<name>-<provider>-<version>.<ext>
+func mirrorModuleFromObject(key string, fileExtension string) (*core.Module, string, error) {
+	dir, file := path.Split(key)
+
+	dirParts := strings.Split(dir, "/")
+	// Find the "modules" part after "mirror"
+	foundMirror := false
+	for i, part := range dirParts {
+		if part == "mirror" && i+1 < len(dirParts) && dirParts[i+1] == "modules" {
+			foundMirror = true
+			dirParts = dirParts[i+2:] // Skip "mirror" and "modules"
+			break
+		}
+	}
+	if !foundMirror {
+		return nil, "", fmt.Errorf("mirrored module key is invalid: could not find mirror/modules in path")
+	}
+
+	// dirParts should now be: [hostname, namespace, name, provider, ""]
+	if len(dirParts) < 4 {
+		return nil, "", fmt.Errorf("mirrored module key is invalid: expected at least 4 directory parts (hostname/namespace/name/provider), but was %d", len(dirParts))
+	}
+
+	hostname := dirParts[0]
+	namespace := dirParts[1]
+	name := dirParts[2]
+	provider := dirParts[3]
+
+	fileExtension = fmt.Sprintf(".%s", fileExtension) // Add the dot to the file extension
+	if !strings.HasSuffix(file, fileExtension) {
+		return nil, "", fmt.Errorf("expected file extension \"%s\" but found \"%s\"", fileExtension, path.Ext(file))
+	}
+	file = strings.TrimSuffix(file, fileExtension) // Remove the file extension
+
+	filePrefix := fmt.Sprintf("%s-%s-%s-", namespace, name, provider)
+	if !strings.HasPrefix(file, filePrefix) {
+		return nil, "", fmt.Errorf("expected file prefix \"%s\" but file is \"%s\"", filePrefix, file)
+	}
+	version := strings.TrimPrefix(file, filePrefix) // Remove everything up to the version
+	if version == "" {
+		return nil, "", fmt.Errorf("mirrored module key is invalid, could not parse version")
+	}
+
+	return &core.Module{
+		Namespace: namespace,
+		Name:      name,
+		Provider:  provider,
+		Version:   version,
+	}, hostname, nil
 }

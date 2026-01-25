@@ -163,6 +163,97 @@ func (s *S3Storage) UploadModule(ctx context.Context, namespace, name, provider,
 	return s.GetModule(ctx, namespace, name, provider, version)
 }
 
+// GetMirroredModule retrieves information about a mirrored module from the S3 storage.
+func (s *S3Storage) GetMirroredModule(ctx context.Context, hostname, namespace, name, provider, version string) (core.Module, error) {
+	key := mirrorModulePath(s.bucketPrefix, hostname, namespace, name, provider, version, s.moduleArchiveFormat)
+
+	exists, err := s.objectExists(ctx, key)
+	if err != nil {
+		return core.Module{}, err
+	} else if !exists {
+		return core.Module{}, module.ErrModuleNotFound
+	}
+
+	presigned, err := s.presignedURL(ctx, key)
+	if err != nil {
+		return core.Module{}, err
+	}
+
+	return core.Module{
+		Namespace:   namespace,
+		Name:        name,
+		Provider:    provider,
+		Version:     version,
+		DownloadURL: presigned,
+	}, nil
+}
+
+// ListMirroredModuleVersions lists all versions of a mirrored module from the S3 storage.
+func (s *S3Storage) ListMirroredModuleVersions(ctx context.Context, hostname, namespace, name, provider string) ([]core.Module, error) {
+	input := &s3.ListObjectsV2Input{
+		Bucket: aws.String(s.bucket),
+		Prefix: aws.String(mirrorModulePathPrefix(s.bucketPrefix, hostname, namespace, name, provider)),
+	}
+
+	var modules []core.Module
+	paginator := s3.NewListObjectsV2Paginator(s.client, input)
+	for paginator.HasMorePages() {
+		resp, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%v: %w", module.ErrModuleListFailed, err)
+		}
+
+		for _, obj := range resp.Contents {
+			m, _, err := mirrorModuleFromObject(*obj.Key, s.moduleArchiveFormat)
+			if err != nil {
+				// TODO: we're skipping possible failures silently
+				continue
+			}
+
+			// The download URL is probably not necessary for ListModules
+			m.DownloadURL, err = s.presignedURL(ctx, mirrorModulePath(s.bucketPrefix, hostname, m.Namespace, m.Name, m.Provider, m.Version, s.moduleArchiveFormat))
+			if err != nil {
+				return []core.Module{}, err
+			}
+
+			modules = append(modules, *m)
+		}
+	}
+
+	return modules, nil
+}
+
+// UploadMirroredModule uploads a module to the S3 mirror storage.
+func (s *S3Storage) UploadMirroredModule(ctx context.Context, hostname, namespace, name, provider, version string, body io.Reader) (core.Module, error) {
+	if hostname == "" {
+		return core.Module{}, errors.New("hostname not defined")
+	}
+
+	if namespace == "" {
+		return core.Module{}, errors.New("namespace not defined")
+	}
+
+	if name == "" {
+		return core.Module{}, errors.New("name not defined")
+	}
+
+	if provider == "" {
+		return core.Module{}, errors.New("provider not defined")
+	}
+
+	if version == "" {
+		return core.Module{}, errors.New("version not defined")
+	}
+
+	key := mirrorModulePath(s.bucketPrefix, hostname, namespace, name, provider, version, DefaultModuleArchiveFormat)
+
+	if err := s.upload(ctx, key, body, true); err != nil {
+		return core.Module{}, fmt.Errorf("%v: %w", module.ErrModuleUploadFailed, err)
+	}
+
+	return s.GetMirroredModule(ctx, hostname, namespace, name, provider, version)
+}
+
 // GetProvider retrieves information about a provider from the S3 storage.
 func (s *S3Storage) getProvider(ctx context.Context, pt providerType, provider *core.Provider) (*core.Provider, error) {
 	var archivePath, shasumPath, shasumSigPath string

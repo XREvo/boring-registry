@@ -18,6 +18,7 @@ const (
 type Storage interface {
 	provider.Storage
 	module.Storage
+	module.MirrorStorage
 	mirror.Storage
 	proxy.Storage
 }

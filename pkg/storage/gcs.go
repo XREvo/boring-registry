@@ -115,6 +115,84 @@ func (s *GCSStorage) UploadModule(ctx context.Context, namespace, name, provider
 	return s.GetModule(ctx, namespace, name, provider, version)
 }
 
+// GetMirroredModule retrieves information about a mirrored module from the GCS storage.
+func (s *GCSStorage) GetMirroredModule(ctx context.Context, hostname, namespace, name, provider, version string) (core.Module, error) {
+	o := s.sc.Bucket(s.bucket).Object(mirrorModulePath(s.bucketPrefix, hostname, namespace, name, provider, version, s.moduleArchiveFormat))
+	attrs, err := o.Attrs(ctx)
+	if err != nil {
+		return core.Module{}, errors.Join(module.ErrModuleNotFound, err)
+	}
+	url, err := s.presignedURL(ctx, attrs.Name)
+	if err != nil {
+		return core.Module{}, fmt.Errorf("%v: %w", module.ErrModuleNotFound, err)
+	}
+	return core.Module{
+		Namespace:   namespace,
+		Name:        name,
+		Provider:    provider,
+		Version:     version,
+		DownloadURL: url,
+	}, nil
+}
+
+// ListMirroredModuleVersions lists all versions of a mirrored module from the GCS storage.
+func (s *GCSStorage) ListMirroredModuleVersions(ctx context.Context, hostname, namespace, name, provider string) ([]core.Module, error) {
+	prefix := mirrorModulePathPrefix(s.bucketPrefix, hostname, namespace, name, provider)
+
+	query := &storage.Query{
+		Prefix: prefix,
+	}
+
+	var modules []core.Module
+	it := s.sc.Bucket(s.bucket).Objects(ctx, query)
+	for {
+		attrs, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return modules, err
+		}
+		m, _, err := mirrorModuleFromObject(attrs.Name, s.moduleArchiveFormat)
+		if err != nil {
+			// TODO: we're skipping possible failures silently
+			continue
+		}
+		modules = append(modules, *m)
+	}
+	return modules, nil
+}
+
+// UploadMirroredModule uploads a module to the GCS mirror storage.
+func (s *GCSStorage) UploadMirroredModule(ctx context.Context, hostname, namespace, name, provider, version string, body io.Reader) (core.Module, error) {
+	if hostname == "" {
+		return core.Module{}, errors.New("hostname not defined")
+	}
+
+	if namespace == "" {
+		return core.Module{}, errors.New("namespace not defined")
+	}
+
+	if name == "" {
+		return core.Module{}, errors.New("name not defined")
+	}
+
+	if provider == "" {
+		return core.Module{}, errors.New("provider not defined")
+	}
+
+	if version == "" {
+		return core.Module{}, errors.New("version not defined")
+	}
+
+	key := mirrorModulePath(s.bucketPrefix, hostname, namespace, name, provider, version, s.moduleArchiveFormat)
+	if err := s.upload(ctx, key, body, true); err != nil {
+		return core.Module{}, fmt.Errorf("%v: %w", module.ErrModuleUploadFailed, err)
+	}
+
+	return s.GetMirroredModule(ctx, hostname, namespace, name, provider, version)
+}
+
 // GetProvider implements provider.Storage
 func (s *GCSStorage) getProvider(ctx context.Context, pt providerType, provider *core.Provider) (*core.Provider, error) {
 	var archivePath, shasumPath, shasumSigPath string
